@@ -1,0 +1,58 @@
+# ========================================
+# Global ignores
+# ========================================
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+.env
+.env.*
+node_modules/
+__pycache__/
+.vscode/
+.idea/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.db
+*.sqlite
+*.sqlite3
+*.sln
+
+
+# ========================================
+# Python (tg_bot)
+# ========================================
+/tg_bot/__pycache__/
+/tg_bot/*.pyc
+/tg_bot/*.pyo
+/tg_bot/.venv/
+/tg_bot/myenv/
+/tg_bot/.mypy_cache/
+/tg_bot/.pytest_cache/
+/tg_bot/.env
+
+# ========================================
+# Angular (front)
+# ========================================
+/front/node_modules/
+/front/dist/
+/front/.angular/cache/
+/front/.env
+/front/.env.local
+/front/.env.development
+/front/.env.production
+
+# ========================================
+# ASP.NET (back)
+/back/bin/
+/back/obj/
+/back/.vs/
+/back/appsettings.Development.json
+/back/appsettings.Local.json
+/back/appsettings.*.json
+/back/wwwroot/lib/
+/back/Properties/launchSettings.json
