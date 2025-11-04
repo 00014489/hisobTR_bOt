@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-# load_dotenv(dotenv_path='/home/VibeMusic/projects/vibePlay/.env')
+load_dotenv()
 import sys
 import asyncio
 import logging
@@ -15,7 +15,7 @@ from aiogram import Bot, Dispatcher
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
 
-load_dotenv()
+
 TOKEN = os.getenv('FSOCIETY')
 # Initialize Bot and Dispatcher
 bot = Bot(token = TOKEN)
