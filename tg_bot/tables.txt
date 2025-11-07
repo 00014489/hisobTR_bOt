@@ -52,3 +52,24 @@ BEFORE INSERT ON users
 FOR EACH ROW
 EXECUTE FUNCTION set_initial_premium_date();
 
+//categories table
+CREATE TABLE categories (
+  id BIGSERIAL PRIMARY KEY,
+  title VARCHAR(15) NOT NULL,
+  created_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  is_ex BOOLEAN NOT NULL,
+  user_id BIGINT NOT NULL REFERENCES users(id)
+);
+
+
+//dengies table
+CREATE TABLE dengies (
+    id BIGSERIAL PRIMARY KEY,
+    amount BIGINT NOT NULL,
+    comment_text VARCHAR(30) DEFAULT NULL,
+    created_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    category_id BIGINT REFERENCES categories(id),
+    user_id BIGINT REFERENCES users(id)
+);
+

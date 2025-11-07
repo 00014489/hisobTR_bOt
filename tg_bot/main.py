@@ -7,10 +7,9 @@ from aiogram.exceptions import TelegramNetworkError
 from aiohttp import ClientConnectorError
 import os
 from app.handlers.common import router as common
-# from app.handlers.help import router as help
-# from app.handlers.rashod import router as rashod
-# from app.handlers.akount import router as akount
-# from app.handlers.settings import router as settings
+from app.handlers.expense import router as expense
+from app.handlers.income import router as income
+
 from aiogram import Bot, Dispatcher
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -22,10 +21,9 @@ bot = Bot(token = TOKEN)
 dp = Dispatcher()
 
 async def main():
+    dp.include_router(expense)
     dp.include_router(common)
-    # dp.include_router(rashod)
-    # dp.include_router(akount)
-    # dp.include_router(settings)
+    dp.include_router(income)
 
     # dp.update.middleware(UnifiedMessageMiddleware())  # Update middleware
     # scheduler_task = asyncio.create_task(schedule_daily_task(bot))

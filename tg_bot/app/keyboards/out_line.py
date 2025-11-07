@@ -4,6 +4,41 @@ import app.data.dbContext as db
 
 
 
+async def amounts(user_id: int, lang_code: str, category_id: int) -> ReplyKeyboardMarkup:
+    """
+    Build a reply keyboard with dynamic amount buttons and a cancel button.
+
+    Args:
+        user_id (int): User's Telegram ID (can be used for user-specific logic)
+        langCode (str): Language code ('en', 'ru', 'uz', etc.)
+        amounts (list[int] | None): Optional list of numeric amount options
+
+    Returns:
+        ReplyKeyboardMarkup: A dynamic keyboard with amounts and cancel option
+    """
+    amounts = await db.get_last_amounts(category_id, user_id)
+
+    # Validate the result
+    rows = []
+
+    # Add amount buttons if provided
+    if amounts:
+        for i in range(0, len(amounts), 3):
+            row = [KeyboardButton(text=str(amount)) for amount in amounts[i:i+3]]
+            rows.append(row)
+
+    # Add a cancel button
+    rows.append([KeyboardButton(text=await translator.get_text(lang_code, 'cancel'))])
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        input_field_placeholder=f"{await translator.get_text(lang_code, 'chooseOrEnter')} . . ."
+    )
+
+    return keyboard
+
+
 
 async def main_menu(lang_code: str) -> ReplyKeyboardMarkup:
     """

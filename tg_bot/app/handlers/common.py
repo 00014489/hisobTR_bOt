@@ -1,14 +1,17 @@
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardRemove
+from datetime import datetime, timedelta
+from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from datetime import datetime
+
 import logging
+
 import app.cmn.transtalor as translator
 import app.data.dbContext as db
 import app.keyboards.in_line as inKb
 import app.keyboards.out_line as outKb
-from datetime import datetime, timedelta
-from aiogram.filters import CommandStart, Command
-from aiogram.fsm.context import FSMContext
-from datetime import datetime
+
 from app.models.models import User
 
 router = Router()
@@ -57,8 +60,7 @@ async def get_time2(message: Message, state: FSMContext, bot: Bot):
     await state.update_data(datetime_time = rounded_offset)
 
     await message.reply(
-        text=f"✅ {await translator.get_text(lang_code, 'timeUpdated')}",
-        reply_markup=await outKb.main_menu(lang_code)
+        text=f"{await translator.get_text(lang_code, 'timeUpdated')}"
     )
     await get_curriencies(bot, message.from_user.id, lang_code)
     # await message.answer(f"{await translator.get_text(lang_code, "currenciesTxt")}", parse_mode="Markdown")
