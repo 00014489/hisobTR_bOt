@@ -2,23 +2,23 @@ import asyncio
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from app.data.dbContext import get_users_by_time, get_todays_dengies, insert_daily_category_reports, insert_monthly_category_reports, insert_yearly_category_reports
+from app.data.dbContext import get_users_by_time, insert_daily_reports, get_todays_dengies, insert_daily_category_reports, insert_monthly_category_reports, insert_yearly_category_reports
 from apscheduler.triggers.cron import CronTrigger
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-import os, io, hashlib, math
-from playwright.async_api import async_playwright
+# from concurrent.futures import ThreadPoolExecutor
+# from pathlib import Path
+# import os, io, hashlib, math
+# from playwright.async_api import async_playwright
 
 
 from app.cmn.transtalor import get_text, smart_sleep
 import logging
-from aiogram.types import FSInputFile
-from typing import List, Tuple
+# from aiogram.types import FSInputFile
+# from typing import List, Tuple
 # import app.keyboards.inLine as inKb
 # import app.data.connection as postgresql
 from datetime import datetime
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import plotly.graph_objects as go
+# from PIL import Image, ImageDraw, ImageFont, ImageFilter
+# import plotly.graph_objects as go
 
 
 
@@ -142,10 +142,12 @@ async def update_daily_report(user_ids: list[int]):
     if not user_ids:
         logging.info("No users found for data updating.")
         return
-    
+    # For every day total
+    await insert_daily_reports(user_ids)
+
+
     # For every day
     await insert_daily_category_reports(user_ids)
-
     # For every month
     await insert_monthly_category_reports(user_ids)
 

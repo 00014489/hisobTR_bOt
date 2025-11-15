@@ -103,7 +103,7 @@ async def get_all_categories(message: Message):
     user_id = message.from_user.id
     lng_code = await translator.get_lang_code_by_text_async(translator.translations, 'rashod', message.text)
     count_ex = await db.get_todays_expense_count(user_id)
-    logging.info(count_ex)
+    # logging.info(count_ex)
     if count_ex < 50:
         await translator.smart_sleep(
             message.reply,

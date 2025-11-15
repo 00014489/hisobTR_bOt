@@ -149,6 +149,19 @@ CREATE TABLE dengies (
     user_id BIGINT REFERENCES users(id)
 );
 
+//reports all
+CREATE TABLE daily_reports (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    total_amount BIGINT NOT NULL DEFAULT 0,
+    is_ex BOOLEAN NOT NULL DEFAULT TRUE,
+    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    CONSTRAINT fk_yearly_reports_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+
+
 
 //reports categories
 CREATE TABLE yearly_category_reports (
@@ -203,14 +216,4 @@ CREATE TABLE daily_category_reports (
 
 
 
-//reports all
-CREATE TABLE daily_reports (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    total_amount BIGINT NOT NULL DEFAULT 0,
-    is_ex BOOLEAN NOT NULL DEFAULT TRUE,
-    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
-    CONSTRAINT fk_yearly_reports_user
-        FOREIGN KEY (user_id) REFERENCES users(id)
-);
 

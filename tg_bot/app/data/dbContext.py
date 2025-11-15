@@ -133,65 +133,70 @@ async def insert_daily_category_reports(tg_user_ids: list[int]):
             await connection.close()
 
 
-async def insert_daily_report(tg_user_id: int, file_id: str, file_path: str):
+
+async def insert_daily_reports(tg_user_ids: list[int]):
     """
-    Aggregate today's expenses from dengies, generate statistics image,
-    and insert a daily report for the user.
-    month_id is NULL initially.
+    Aggregate today's expenses and incomes for each user and insert
+    into the daily_reports table.
+    
+    created_date is set to: date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc
     """
     connection = None
     try:
         connection = await get_db_connection()
         async with connection.cursor() as cursor:
 
-            # Fetch internal user_id and time_utc
-            await cursor.execute(
-                "SELECT id, time_utc FROM users WHERE tg_user_id = %s",
-                (tg_user_id,)
-            )
-            result = await cursor.fetchone()
-            if not result:
-                logging.warning(f"User with tg_user_id {tg_user_id} not found.")
-                return
-            user_id, time_utc = result
+            for tg_user_id in tg_user_ids:
 
-            # Calculate today's total_amount for the user
-            await cursor.execute(
-                """
-                SELECT COALESCE(SUM(amount), 0)
-                FROM dengies d
-                WHERE d.user_id = %s
-                  AND date_trunc('day', d.created_date) = date_trunc('day', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s)
-                """,
-                (user_id, time_utc)
-            )
-            total_amount_row = await cursor.fetchone()
-            total_amount = total_amount_row[0] if total_amount_row else 0
-
-            # Generate daily statistics image
-
-            # Insert into daily_reports with month_id NULL
-            await cursor.execute(
-                """
-                INSERT INTO daily_reports (
-                    user_id, month_id, total_amount, file_id, file_path, created_date
+                # Aggregate today's totals grouped by expense/income type
+                await cursor.execute(
+                    """
+                    SELECT
+                        u.id AS user_id,
+                        u.time_utc,
+                        SUM(d.amount) AS total_amount,
+                        CASE 
+                            WHEN c.is_ex THEN TRUE
+                            ELSE FALSE
+                        END AS is_ex
+                    FROM dengies d
+                    JOIN users u ON d.user_id = u.id
+                    JOIN categories c ON c.id = d.category_id
+                    WHERE u.tg_user_id = %s
+                        AND date_trunc('day', d.created_date) =
+                            date_trunc('day', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc)
+                    GROUP BY u.id, u.time_utc, is_ex;
+                    """,
+                    (tg_user_id,)
                 )
-                VALUES (%s, NULL, %s, %s, %s, date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s)
-                """,
-                (user_id, total_amount, file_id, file_path, time_utc)
-            )
+
+                aggregated_rows = await cursor.fetchall()
+
+                # Insert aggregated totals into daily_reports
+                for user_id, time_utc, total_amount, is_ex in aggregated_rows:
+                    await cursor.execute(
+                        """
+                        INSERT INTO daily_reports (
+                            user_id, total_amount, is_ex, created_date
+                        )
+                        VALUES (%s, %s, %s, date_trunc('second', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s));
+                        """,
+                        (user_id, total_amount, is_ex, time_utc)
+                    )
 
             await connection.commit()
-            logging.info(f"Daily report inserted for user {user_id}, file: {file_path}")
+            logging.info("Daily reports inserted successfully for tg_user_ids.")
 
-    except (Exception, Error) as e:
-        logging.error("Error inserting daily report: %s", e)
+    except Exception as e:
+        logging.error(f"Error inserting daily reports: {e}")
         if connection:
             await connection.rollback()
 
     finally:
         if connection is not None:
             await connection.close()
+
+
 
 async def minus_user_balance(user_id: int, amount: float) -> float | None:
     """
@@ -782,19 +787,19 @@ async def insert_or_update_user(
 
             #Get translated category names
             food = await translator.get_text(language_is, "cat_food")
-            food_names = translator.get_all_values_by_key(translator.translations, "cat_food")
+            # food_names = translator.get_all_values_by_key(translator.translations, "cat_food")
 
             salary = await translator.get_text(language_is, "cat_salary")
-            sal_names = translator.get_all_values_by_key(translator.translations, "cat_salary")
+            # sal_names = translator.get_all_values_by_key(translator.translations, "cat_salary")
 
             transport = await translator.get_text(language_is, "cat_transport")
-            transport_names = translator.get_all_values_by_key(translator.translations, "cat_transport")
+            # transport_names = translator.get_all_values_by_key(translator.translations, "cat_transport")
 
             gifts = await translator.get_text(language_is, "cat_gift")
-            gifts_names = translator.get_all_values_by_key(translator.translations, "cat_gift")
+            # gifts_names = translator.get_all_values_by_key(translator.translations, "cat_gift")
             
             other = await translator.get_text(language_is, "other")
-            other_names = translator.get_all_values_by_key(translator.translations, "other")
+            # other_names = translator.get_all_values_by_key(translator.translations, "other")
 
             if inserted:
                 # Create default categories if user is new
@@ -813,36 +818,36 @@ async def insert_or_update_user(
                     [(salary, user_db_id), (gifts, user_db_id), (other, user_db_id)]
                 )
                 logging.info(f"✅ Created default categories for new user {user_id}")
-            else:
-                # Update existing default categories to match new language
-                await cur.execute(
-                    """
-                    UPDATE categories
-                    SET title = CASE
-                        WHEN LOWER(title) = ANY(%s) THEN %s
-                        WHEN LOWER(title) = ANY(%s) THEN %s
-                        WHEN LOWER(title) = ANY(%s) THEN %s
-                        ELSE title
-                    END
-                    WHERE user_id = %s AND is_ex = TRUE;
-                    """,
-                    (food_names, food, transport_names, transport, other_names, other, user_db_id)
-                )
+            # else:
+            #     # Update existing default categories to match new language
+            #     await cur.execute(
+            #         """
+            #         UPDATE categories
+            #         SET title = CASE
+            #             WHEN LOWER(title) = ANY(%s) THEN %s
+            #             WHEN LOWER(title) = ANY(%s) THEN %s
+            #             WHEN LOWER(title) = ANY(%s) THEN %s
+            #             ELSE title
+            #         END
+            #         WHERE user_id = %s AND is_ex = TRUE;
+            #         """,
+            #         (food_names, food, transport_names, transport, other_names, other, user_db_id)
+            #     )
 
-                await cur.execute(
-                    """
-                    UPDATE categories
-                    SET title = CASE
-                        WHEN LOWER(title) = ANY(%s) THEN %s
-                        WHEN LOWER(title) = ANY(%s) THEN %s
-                        WHEN LOWER(title) = ANY(%s) THEN %s
-                        ELSE title
-                    END
-                    WHERE user_id = %s AND is_ex = FALSE;
-                    """,
-                    (sal_names, salary, gifts_names, gifts, other_names, other, user_db_id)
-                )
-                logging.info(f"🔁 Updated default categories for existing user {user_id} language {language_is}")
+            #     await cur.execute(
+            #         """
+            #         UPDATE categories
+            #         SET title = CASE
+            #             WHEN LOWER(title) = ANY(%s) THEN %s
+            #             WHEN LOWER(title) = ANY(%s) THEN %s
+            #             WHEN LOWER(title) = ANY(%s) THEN %s
+            #             ELSE title
+            #         END
+            #         WHERE user_id = %s AND is_ex = FALSE;
+            #         """,
+            #         (sal_names, salary, gifts_names, gifts, other_names, other, user_db_id)
+            #     )
+            #     logging.info(f"🔁 Updated default categories for existing user {user_id} language {language_is}")
 
             await conn.commit()
             return "inserted" if inserted else "updated"
