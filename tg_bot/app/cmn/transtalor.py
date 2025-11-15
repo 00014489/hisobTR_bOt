@@ -53,3 +53,35 @@ async def get_text(lang: str, key: str) -> str:
         return translations[lang][key]
     except KeyError:
         return f"[{key} not found in {lang}]"
+    
+
+async def smart_sleep(bot_method, *args, **kwargs):
+    """
+    A wrapper function to handle Telegram's FloodWait exceptions gracefully.
+    
+    Args:
+        bot_method: The bot's method to execute (e.g., bot.send_message).
+        *args: Positional arguments for the method.
+        **kwargs: Keyword arguments for the method.
+    
+    Returns:
+        The result of the bot method if successful.
+    """
+    while True:
+        try:
+            # Attempt the bot method
+            return await bot_method(*args, **kwargs)
+        except TelegramRetryAfter as e:
+            # Handle FloodWait by sleeping for the recommended timeout
+            logging.warning(f"FloodWait detected. Retrying after {e.retry_after} seconds...")
+            await asyncio.sleep(e.retry_after)
+        except TelegramAPIError as ex:
+            # Log other Telegram API-related exceptions
+            logging.error(f"from smart_sleep Telegram API Error: {ex}")
+            return
+            # raise
+        except Exception as ex:
+            # Log other unexpected exceptions
+            logging.error(f"from smart_sleep Unexpected error: {ex}")
+            # raise
+            return

@@ -7,10 +7,10 @@ CREATE TABLE users (
   currency_is VARCHAR(3) NOT NULL DEFAULT 'USD',
   balans NUMERIC(12,2) NOT NULL DEFAULT 0,
   language_is VARCHAR(2) NOT NULL DEFAULT 'en',
-  created_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+  created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
   time_utc INTERVAL NOT NULL DEFAULT '0 hours',
   is_premium BOOLEAN NOT NULL DEFAULT TRUE,
-  premium_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+  premium_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
 );
 
 
@@ -54,22 +54,163 @@ EXECUTE FUNCTION set_initial_premium_date();
 
 //categories table
 CREATE TABLE categories (
-  id BIGSERIAL PRIMARY KEY,
-  title VARCHAR(15) NOT NULL,
-  created_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
-  is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  is_ex BOOLEAN NOT NULL,
-  user_id BIGINT NOT NULL REFERENCES users(id)
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(15) NOT NULL,
+    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_ex BOOLEAN NOT NULL,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    color_id INT REFERENCES colors(id)
+    );
+
+CREATE TABLE colors (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(30) NOT NULL UNIQUE
 );
 
+CREATE OR REPLACE FUNCTION assign_unique_color()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.color_id IS NULL THEN
+        SELECT id INTO NEW.color_id
+        FROM colors c
+        WHERE c.id NOT IN (
+            SELECT color_id FROM categories WHERE user_id = NEW.user_id
+        )
+        ORDER BY random()
+        LIMIT 1;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_assign_unique_color
+BEFORE INSERT ON categories
+FOR EACH ROW
+EXECUTE FUNCTION assign_unique_color();
+
+
+
+INSERT INTO colors (name) VALUES
+('Red'),
+('Blue'),
+('Green'),
+('Yellow'),
+('Orange'),
+('Purple'),
+('Pink'),
+('Cyan'),
+('Magenta'),
+('Lime'),
+('Teal'),
+('Brown'),
+('Gray'),
+('Black'),
+('White'),
+('Violet'),
+('Indigo'),
+('Turquoise'),
+('Gold'),
+('Silver');
+
+
+
+
+[
+  {"name": "Red", "rgb": "#FF0000"},
+  {"name": "Blue", "rgb": "#0000FF"},
+  {"name": "Green", "rgb": "#008000"},
+  {"name": "Yellow", "rgb": "#FFFF00"},
+  {"name": "Orange", "rgb": "#FFA500"},
+  {"name": "Purple", "rgb": "#800080"},
+  {"name": "Pink", "rgb": "#FFC0CB"},
+  {"name": "Cyan", "rgb": "#00FFFF"},
+  {"name": "Magenta", "rgb": "#FF00FF"},
+  {"name": "Lime", "rgb": "#00FF00"},
+  {"name": "Teal", "rgb": "#008080"},
+  {"name": "Brown", "rgb": "#A52A2A"},
+  {"name": "Gray", "rgb": "#808080"},
+  {"name": "Black", "rgb": "#000000"},
+  {"name": "White", "rgb": "#FFFFFF"},
+  {"name": "Violet", "rgb": "#EE82EE"},
+  {"name": "Indigo", "rgb": "#4B0082"},
+  {"name": "Turquoise", "rgb": "#40E0D0"},
+  {"name": "Gold", "rgb": "#FFD700"},
+  {"name": "Silver", "rgb": "#C0C0C0"}
+]
 
 //dengies table
 CREATE TABLE dengies (
     id BIGSERIAL PRIMARY KEY,
-    amount BIGINT NOT NULL,
+    amount NUMERIC(12,2) NOT NULL,
     comment_text VARCHAR(30) DEFAULT NULL,
-    created_date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
     category_id BIGINT REFERENCES categories(id),
     user_id BIGINT REFERENCES users(id)
+);
+
+
+//reports categories
+CREATE TABLE yearly_category_reports (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    category_id BIGINT NOT NULL,
+    total_amount BIGINT NOT NULL DEFAULT 0,
+    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    CONSTRAINT fk_yearly_reports_user
+        FOREIGN KEY (user_id)
+        REFERENCES users (id),
+    CONSTRAINT fk_yearly_reports_category
+        FOREIGN KEY (category_id)
+        REFERENCES categories (id)
+);
+
+CREATE TABLE monthly_category_reports (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
+    category_id BIGINT NOT NULL,
+    year_id BIGINT,
+    total_amount BIGINT NOT NULL DEFAULT 0,
+    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    CONSTRAINT fk_monthly_reports_user
+        FOREIGN KEY (user_id)
+        REFERENCES users (id),
+    CONSTRAINT fk_monthly_reports_category
+        FOREIGN KEY (category_id)
+        REFERENCES categories (id),
+    CONSTRAINT fk_monthly_reports_year
+        FOREIGN KEY (year_id)
+        REFERENCES yearly_category_reports (id)
+);
+
+CREATE TABLE daily_category_reports (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
+    category_id BIGINT NOT NULL,
+    month_id BIGINT,
+    total_amount BIGINT NOT NULL DEFAULT 0,
+    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    CONSTRAINT fk_daily_reports_user
+        FOREIGN KEY (user_id)
+        REFERENCES users (id),
+    CONSTRAINT fk_daily_reports_category
+        FOREIGN KEY (category_id)
+        REFERENCES categories (id),
+    CONSTRAINT fk_daily_reports_month
+        FOREIGN KEY (month_id)
+        REFERENCES monthly_category_reports (id)
+);
+
+
+
+//reports all
+CREATE TABLE daily_reports (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    total_amount BIGINT NOT NULL DEFAULT 0,
+    is_ex BOOLEAN NOT NULL DEFAULT TRUE,
+    created_date TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL DEFAULT date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    CONSTRAINT fk_yearly_reports_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
 );
 

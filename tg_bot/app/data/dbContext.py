@@ -33,7 +33,165 @@ async def get_db_connection():
     
     return conn
 
-import logging
+
+
+async def get_todays_dengies(user_id: int):
+    connection = None
+    try:
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                """
+                    SELECT 
+                        d.amount,
+                        c.title AS category_name,
+                        d.comment_text,
+                        to_char(d.created_date, 'HH24:MI') AS created_time,
+                        u.currency_is               -- ⬅ added currency
+                    FROM dengies d
+                    JOIN categories c ON d.category_id = c.id
+                    JOIN users u ON d.user_id = u.id
+                    WHERE 
+                        u.tg_user_id = %s
+                        AND c.is_ex = TRUE
+                        AND date_trunc('day', d.created_date) = 
+                            date_trunc('day', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc)
+                    ORDER BY d.created_date DESC;
+                """,
+                (user_id,)
+            )
+
+            rows = await cursor.fetchall()
+            logging.info(f"Fetched {len(rows)} records for user_id={user_id}")
+            return rows  # now each row has 5 values
+
+    except (Exception, Error) as error:
+        logging.error("Error while fetching today's dengies: %s", error)
+        return []
+
+    finally:
+        if connection is not None:
+            await connection.close()
+
+
+async def insert_daily_category_reports(tg_user_ids: list[int]):
+    """
+    Aggregate today's expenses per category for each user (using tg_user_id)
+    and insert into daily_category_reports.
+    month_id is NULL.
+    created_date is set to (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc
+    """
+    connection = None
+    try:
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+            
+            for tg_user_id in tg_user_ids:
+                # Aggregate total amount per category for today for this tg_user_id
+                await cursor.execute(
+                    """
+                    SELECT 
+                        d.category_id,
+                        SUM(d.amount) AS total_amount,
+                        u.id AS user_id,
+                        u.time_utc
+                    FROM dengies d
+                    JOIN users u ON d.user_id = u.id
+                    WHERE 
+                        u.tg_user_id = %s
+                        AND date_trunc('day', d.created_date) = 
+                            date_trunc('day', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc)
+                    GROUP BY d.category_id, u.id, u.time_utc;
+                    """,
+                    (tg_user_id,)
+                )
+                
+                aggregated_rows = await cursor.fetchall()
+                
+                # Insert aggregated totals into daily_category_reports
+                for category_id, total_amount, user_id, time_utc in aggregated_rows:
+                    await cursor.execute(
+                        """
+                        INSERT INTO daily_category_reports (
+                            user_id, category_id, month_id, total_amount, created_date
+                        )
+                        VALUES (%s, %s, NULL, %s, date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s);
+                        """,
+                        (user_id, category_id, total_amount, time_utc)
+                    )
+            
+            await connection.commit()
+            logging.info("Daily category reports inserted successfully for tg_user_ids.")
+
+    except (Exception, Error) as e:
+        logging.error("Error inserting daily category reports: %s", e)
+        if connection:
+            await connection.rollback()
+    
+    finally:
+        if connection is not None:
+            await connection.close()
+
+
+async def insert_daily_report(tg_user_id: int, file_id: str, file_path: str):
+    """
+    Aggregate today's expenses from dengies, generate statistics image,
+    and insert a daily report for the user.
+    month_id is NULL initially.
+    """
+    connection = None
+    try:
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+
+            # Fetch internal user_id and time_utc
+            await cursor.execute(
+                "SELECT id, time_utc FROM users WHERE tg_user_id = %s",
+                (tg_user_id,)
+            )
+            result = await cursor.fetchone()
+            if not result:
+                logging.warning(f"User with tg_user_id {tg_user_id} not found.")
+                return
+            user_id, time_utc = result
+
+            # Calculate today's total_amount for the user
+            await cursor.execute(
+                """
+                SELECT COALESCE(SUM(amount), 0)
+                FROM dengies d
+                WHERE d.user_id = %s
+                  AND date_trunc('day', d.created_date) = date_trunc('day', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s)
+                """,
+                (user_id, time_utc)
+            )
+            total_amount_row = await cursor.fetchone()
+            total_amount = total_amount_row[0] if total_amount_row else 0
+
+            # Generate daily statistics image
+
+            # Insert into daily_reports with month_id NULL
+            await cursor.execute(
+                """
+                INSERT INTO daily_reports (
+                    user_id, month_id, total_amount, file_id, file_path, created_date
+                )
+                VALUES (%s, NULL, %s, %s, %s, date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s)
+                """,
+                (user_id, total_amount, file_id, file_path, time_utc)
+            )
+
+            await connection.commit()
+            logging.info(f"Daily report inserted for user {user_id}, file: {file_path}")
+
+    except (Exception, Error) as e:
+        logging.error("Error inserting daily report: %s", e)
+        if connection:
+            await connection.rollback()
+
+    finally:
+        if connection is not None:
+            await connection.close()
 
 async def minus_user_balance(user_id: int, amount: float) -> float | None:
     """
@@ -77,6 +235,7 @@ async def minus_user_balance(user_id: int, amount: float) -> float | None:
             await conn.close()
 
 
+
 async def get_category_name(cat_id: int) -> str | None:
     connection = None
     try:
@@ -97,6 +256,175 @@ async def get_category_name(cat_id: int) -> str | None:
     finally:
         if connection is not None:
             await connection.close()
+
+
+async def get_todays_expense_count(tg_user_id: int):
+    """
+    Returns how many expenses the user made today according to their local time (created_date is already in local time).
+    """
+    connection = None
+    try:
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+            await cursor.execute(
+                """
+                    SELECT COUNT(*)
+                    FROM dengies d
+                    JOIN users u ON d.user_id = u.id
+                    WHERE u.tg_user_id = %s
+                    AND d.created_date::date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + u.time_utc::interval)::date;
+                """,
+                (tg_user_id,)
+            )
+            result = await cursor.fetchone()
+            return result[0] if result else 0
+
+    except Exception as e:
+        logging.error(f"Error fetching today's expense count for {tg_user_id}: {e}")
+        return 0
+
+    finally:
+        if connection is not None:
+            await connection.close()
+
+
+async def infos_get_user(tg_user_id: int):
+    """
+    Returns user information including:
+    - balance
+    - currency
+    - lang_code
+    - is_premium
+    - premium_date
+    - monthly_expenses
+    - monthly_income (using user's local time via time_utc)
+    """
+    connection = None
+    try:
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+
+            await cursor.execute(
+                """
+                    SELECT 
+                        u.balans,
+                        u.currency_is,
+                        u.language_is AS lang_code,
+                        u.is_premium,
+                        TO_CHAR(u.premium_date, 'YYYY-MM-DD') AS premium_date,
+
+                        -- Monthly expenses (local month)
+                        COALESCE((
+                            SELECT SUM(dr.total_amount)
+                            FROM daily_reports dr
+                            WHERE dr.user_id = u.id
+                              AND dr.is_ex = TRUE
+                              AND DATE_TRUNC(
+                                    'month',
+                                    dr.created_date
+                                  ) = DATE_TRUNC(
+                                    'month',
+                                    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc::interval
+                                  )
+                        ), 0) AS monthly_expenses,
+
+                        -- Monthly income (local month)
+                        COALESCE((
+                            SELECT SUM(dr.total_amount)
+                            FROM daily_reports dr
+                            WHERE dr.user_id = u.id
+                              AND dr.is_ex = FALSE
+                              AND DATE_TRUNC(
+                                    'month',
+                                    dr.created_date
+                                  ) = DATE_TRUNC(
+                                    'month',
+                                    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc::interval
+                                  )
+                        ), 0) AS monthly_income
+
+                    FROM users u
+                    WHERE u.tg_user_id = %s
+                    LIMIT 1;
+                """,
+                (tg_user_id,)
+            )
+
+            row = await cursor.fetchone()
+            if not row:
+                return None
+
+            return {
+                "balance": float(row[0]),
+                "currency": row[1],
+                "lang_code": row[2],
+                "is_premium": row[3],
+                "premium_date": row[4],
+                "monthly_expenses": float(row[5]),
+                "monthly_income": float(row[6]),
+            }
+
+    except Exception as e:
+        logging.error(f"Error fetching user data for tg_user_id {tg_user_id}: {e}")
+        return None
+
+    finally:
+        if connection is not None:
+            await connection.close()
+
+async def get_users_by_time(target_hour: int, target_minute: int) -> list[tuple[int, str]] | None:
+    """
+    Return a list of (tg_user_id, language_is) of users whose local time
+    matches the target hour and minute by calculating the required time_utc.
+    """
+    connection = None
+    try:
+        now_utc = datetime.utcnow()
+
+        # Build target datetime today
+        target_time = now_utc.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+
+        # Shift to next day if target time is earlier than now
+        if target_time < now_utc:
+            target_time += timedelta(days=1)
+
+        # Compute required offset
+        offset: timedelta = target_time - now_utc
+
+        # Round to nearest minute to avoid second mismatches
+        total_seconds = int(round(offset.total_seconds() / 60) * 60)
+
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        # Format as PostgreSQL INTERVAL string
+        interval_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"  # 'HH:MM:SS'
+
+        logging.info(f"Computed time_utc interval: {interval_str}")
+
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+            await cursor.execute("""
+                SELECT tg_user_id, language_is
+                FROM users
+                WHERE time_utc = CAST(%s AS INTERVAL);
+            """, (interval_str,))
+
+            rows = await cursor.fetchall()
+            if not rows:
+                return None
+
+            # Return list of tuples: (tg_user_id, language_is)
+            return [(row[0], row[1]) for row in rows]
+
+    except Exception as error:
+        logging.error("Error fetching users by time: %s", error)
+        return None
+
+    finally:
+        if connection is not None:
+            await connection.close()
+
 
 
 async def get_last_amounts(category_id: int, user_id: int) -> list[int]:
@@ -137,8 +465,14 @@ async def insert_dengies(amount: float, category_id: int, user_id: int) -> int |
         async with connection.cursor() as cursor:
             await cursor.execute(
                 """
-                INSERT INTO dengies (amount, category_id, user_id)
-                VALUES (%s, %s, (SELECT id from users WHERE tg_user_id = %s))
+                INSERT INTO dengies (amount, created_date, category_id, user_id)
+                SELECT
+                    %s AS amount,
+                    date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + u.time_utc AS created_date,
+                    %s AS category_id,
+                    u.id AS user_id
+                FROM users u
+                WHERE u.tg_user_id = %s
                 RETURNING id;
                 """,
                 (amount, category_id, user_id)
@@ -662,3 +996,226 @@ async def update_comment_text(dengies_id: int, comment_text: str) -> bool:
     finally:
         if conn:
             await conn.close()
+
+
+async def add_user_balance(user_id: int, amount: float, MAX_NUMERIC_12_2: float) -> float | None:
+    """
+    Atomically adds the given amount to the user's balance if it doesn't exceed NUMERIC(12,2) max.
+    Returns the new balance, or None if addition would overflow or user not found.
+    """
+    conn = None
+    try:
+        conn = await get_db_connection()
+        async with conn.cursor() as cur:
+            # Perform addition only if it does not exceed MAX_NUMERIC_12_2
+            await cur.execute(
+                """
+                UPDATE users
+                SET balans = balans + %s
+                WHERE tg_user_id = %s AND balans + %s <= %s
+                RETURNING balans;
+                """,
+                (amount, user_id, amount, MAX_NUMERIC_12_2)
+            )
+
+            result = await cur.fetchone()
+            await conn.commit()
+
+            if result:
+                # Successfully updated and returned new balance
+                return float(result[0])
+            else:
+                # Either user not found or addition would exceed NUMERIC(12,2) max
+                logging.warning(
+                    f"Cannot add amount: user_id={user_id}, amount={amount} would exceed NUMERIC(12,2) limit"
+                )
+                return None
+
+    except Exception as e:
+        logging.error(f"Failed to add balance for user_id={user_id}: {e}")
+        return None
+
+    finally:
+        if conn:
+            await conn.close()
+
+
+async def insert_monthly_category_reports(tg_user_ids: list[int]):
+    """
+    Aggregate the previous month's daily category reports for each user,
+    insert into monthly_category_reports with created_date in user's local time,
+    and update daily_category_reports.month_id.
+    """
+    connection = None
+    try:
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+
+            # Determine previous month and year
+            today = datetime.utcnow()
+            first_day_this_month = today.replace(day=1)
+            last_day_prev_month = first_day_this_month - timedelta(days=1)
+            prev_month = last_day_prev_month.month
+            prev_year = last_day_prev_month.year
+
+            # # --- Manual override for testing ---
+            # prev_month = 11   # May
+            # prev_year = 2025 # Year 2024
+
+            for tg_user_id in tg_user_ids:
+                # Get the user's internal id and time_utc
+                await cursor.execute(
+                    "SELECT id, time_utc FROM users WHERE tg_user_id = %s",
+                    (tg_user_id,)
+                )
+                result = await cursor.fetchone()
+                if not result:
+                    continue
+                user_id, time_utc = result
+
+                # Aggregate total_amount per category for previous month from daily_category_reports
+                await cursor.execute(
+                    """
+                    SELECT 
+                        category_id,
+                        SUM(total_amount) AS total_amount
+                    FROM daily_category_reports
+                    WHERE user_id = %s
+                        AND EXTRACT(MONTH FROM created_date) = %s
+                        AND EXTRACT(YEAR FROM created_date) = %s
+                        AND month_id IS NULL
+                    GROUP BY category_id
+                    """,
+                    (user_id, prev_month, prev_year)
+                )
+                aggregated_rows = await cursor.fetchall()
+
+                # Insert into monthly_category_reports and update daily_category_reports
+                for category_id, total_amount in aggregated_rows:
+                    await cursor.execute(
+                        """
+                        INSERT INTO monthly_category_reports (
+                            user_id, category_id, year_id, total_amount, created_date
+                        )
+                        VALUES (%s, %s, NULL, %s, date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s)
+                        RETURNING id
+                        """,
+                        (user_id, category_id, total_amount, time_utc)
+                    )
+                    monthly_id_row = await cursor.fetchone()
+                    monthly_id = monthly_id_row[0]
+
+                    # Update daily_category_reports.month_id for this user and category
+                    await cursor.execute(
+                        """
+                        UPDATE daily_category_reports
+                        SET month_id = %s
+                        WHERE user_id = %s
+                            AND category_id = %s
+                            AND month_id IS NULL
+                            AND EXTRACT(MONTH FROM created_date) = %s
+                            AND EXTRACT(YEAR FROM created_date) = %s
+                        """,
+                        (monthly_id, user_id, category_id, prev_month, prev_year)
+                    )
+
+            await connection.commit()
+            logging.info("Monthly category reports inserted and daily reports updated successfully.")
+
+    except (Exception, Error) as e:
+        logging.error("Error inserting monthly category reports: %s", e)
+        if connection:
+            await connection.rollback()
+
+    finally:
+        if connection is not None:
+            await connection.close()
+
+
+async def insert_yearly_category_reports(tg_user_ids: list[int]):
+    """
+    Aggregate the previous year's monthly totals per category for each user,
+    insert into yearly_category_reports with created_date in user's local time.
+    Then update monthly_category_reports.year_id for the inserted yearly report.
+    """
+    connection = None
+    try:
+        connection = await get_db_connection()
+        async with connection.cursor() as cursor:
+
+            for tg_user_id in tg_user_ids:
+                # Get user's internal id and time_utc
+                await cursor.execute(
+                    "SELECT id, time_utc FROM users WHERE tg_user_id = %s",
+                    (tg_user_id,)
+                )
+                result = await cursor.fetchone()
+                if not result:
+                    continue
+                user_id, time_utc = result
+
+                # Calculate user's local date
+                now_utc = datetime.utcnow()
+                local_time = now_utc + time_utc  # time_utc is INTERVAL in Postgres
+                # Uncomment if you want to restrict to Jan 1
+                if local_time.month != 1 or local_time.day != 1:
+                    logging.info(f"Today is not Jan 1 for user {tg_user_id}. Skipping.")
+                    continue
+
+                prev_year = local_time.year - 1  # last completed year
+                # prev_year = 2025  # for testing manually
+
+                # Aggregate total_amount per category for the previous year
+                await cursor.execute(
+                    """
+                    SELECT 
+                        category_id,
+                        SUM(total_amount) AS total_amount
+                    FROM monthly_category_reports
+                    WHERE user_id = %s
+                        AND EXTRACT(YEAR FROM created_date) = %s
+                    GROUP BY category_id
+                    """,
+                    (user_id, prev_year)
+                )
+                aggregated_rows = await cursor.fetchall()
+
+                for category_id, total_amount in aggregated_rows:
+                    # Insert into yearly_category_reports
+                    await cursor.execute(
+                        """
+                        INSERT INTO yearly_category_reports (
+                            user_id, category_id, total_amount, created_date
+                        )
+                        VALUES (%s, %s, %s, date_trunc('second', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + %s)
+                        RETURNING id
+                        """,
+                        (user_id, category_id, total_amount, time_utc)
+                    )
+                    yearly_id_row = await cursor.fetchone()
+                    yearly_id = yearly_id_row[0]
+
+                    # Update monthly_category_reports.year_id where it is null for this user/category
+                    await cursor.execute(
+                        """
+                        UPDATE monthly_category_reports
+                        SET year_id = %s
+                        WHERE user_id = %s
+                            AND category_id = %s
+                            AND year_id IS NULL
+                            AND EXTRACT(YEAR FROM created_date) = %s
+                        """,
+                        (yearly_id, user_id, category_id, prev_year)
+                    )
+
+            await connection.commit()
+            logging.info("Yearly category reports inserted and monthly reports updated successfully.")
+
+    except (Exception, Error) as e:
+        logging.error("Error inserting yearly category reports: %s", e)
+        if connection:
+            await connection.rollback()
+
+    finally:
+        if connection is not None:
+            await connection.close()

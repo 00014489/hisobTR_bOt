@@ -1,10 +1,9 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-import app.cmn.transtalor as translator
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+import app.cmn.transtalor as translator
 import app.data.dbContext as db
 
-
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 async def get_categories(user_id: int, lng_code: str, is_ex: bool = True, for_delete: bool = False) -> InlineKeyboardMarkup:
     """
@@ -104,3 +103,22 @@ async def languages_keyboard(input_lng_code: str) -> InlineKeyboardMarkup:
         )
 
     return keyboard.adjust(1).as_markup()
+
+async def premium_and_settings(lang_code: str) -> InlineKeyboardMarkup:
+    """
+    Build an inline keyboard with Premium and Settings buttons in one row.
+    """
+    keyboard = InlineKeyboardBuilder()
+
+    keyboard.add(
+        InlineKeyboardButton(
+            text=await translator.get_text(lang_code, 'premium'),
+            callback_data=f"premium_{lang_code}"
+        ),
+        InlineKeyboardButton(
+            text=await translator.get_text(lang_code, 'settings'),
+            callback_data=f"settings_{lang_code}"
+        )
+    )
+
+    return keyboard.adjust(2).as_markup()

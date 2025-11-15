@@ -1,14 +1,20 @@
 from dotenv import load_dotenv
+
 load_dotenv()
+
 import sys
 import asyncio
 import logging
+
 from aiogram.exceptions import TelegramNetworkError
 from aiohttp import ClientConnectorError
 import os
+
+from app.auto.automatik import schedule_hourly_task
 from app.handlers.common import router as common
 from app.handlers.expense import router as expense
 from app.handlers.income import router as income
+from app.handlers.profile import router as profile
 
 from aiogram import Bot, Dispatcher
 # Initialize logging
@@ -22,11 +28,12 @@ dp = Dispatcher()
 
 async def main():
     dp.include_router(expense)
+    dp.include_router(profile)
     dp.include_router(common)
     dp.include_router(income)
 
     # dp.update.middleware(UnifiedMessageMiddleware())  # Update middleware
-    # scheduler_task = asyncio.create_task(schedule_daily_task(bot))
+    scheduler_task = asyncio.create_task(schedule_hourly_task(bot))
     try:
         # Start polling
         await dp.start_polling(bot)
@@ -37,11 +44,11 @@ async def main():
         logging.exception(f"Unexpected error occurred: {e}")
     finally:
         # Ensure the bot's session is closed on shutdown
-        # scheduler_task.cancel()
-        # try:
-            # await scheduler_task
-        # except asyncio.CancelledError:
-            # logging.info("Scheduler task cancelled.")
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            logging.info("Scheduler task cancelled.")
         await bot.session.close()
         logging.info("Bot session closed.")
 

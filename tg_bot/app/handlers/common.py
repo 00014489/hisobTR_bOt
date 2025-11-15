@@ -17,6 +17,18 @@ from app.models.models import User
 router = Router()
 
 
+# @router.message()
+# async def handle_user_message(message: Message):
+#     # Check if the message contains a photo
+#     if message.photo:
+#         # Get the largest version of the photo
+#         largest_photo = message.photo[-1]
+#         file_id = largest_photo.file_id
+        
+#         await message.reply(f"✅ Received your photo! file_id: {file_id}")
+#     else:
+#         await message.reply("❌ Please send an image.")
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
@@ -42,7 +54,10 @@ async def get_time2(message: Message, state: FSMContext, bot: Bot):
         # Try parsing user input
         user_local_dt = datetime.strptime(date_time, "%Y-%m-%d %H:%M")
     except ValueError:
-        await message.reply(text=await translator.get_text(lang_code, 'askTime'))
+        await translator.smart_sleep(
+            message.reply,
+            text=await translator.get_text(lang_code, 'askTime')
+        )
         return
 
     now_utc = datetime.utcnow()
@@ -54,13 +69,17 @@ async def get_time2(message: Message, state: FSMContext, bot: Bot):
     max_offset = timedelta(hours=14)
 
     if rounded_offset < min_offset or rounded_offset > max_offset:
-        await message.answer(await translator.get_text(lang_code, 'invalidUtcOffset'))  # You should define this key in your texts
+        await translator.smart_sleep(
+            message.answer,
+            text=await translator.get_text(lang_code, 'invalidUtcOffset')
+        )
         return
 
     await state.update_data(datetime_time = rounded_offset)
 
-    await message.reply(
-        text=f"{await translator.get_text(lang_code, 'timeUpdated')}"
+    await translator.smart_sleep(
+        message.reply,
+        text=await translator.get_text(lang_code, 'timeUpdated')
     )
     await get_curriencies(bot, message.from_user.id, lang_code)
     # await message.answer(f"{await translator.get_text(lang_code, "currenciesTxt")}", parse_mode="Markdown")
@@ -98,19 +117,29 @@ async def get_currency(message: Message, state: FSMContext):
     # Validate currency (3 letters)
     if len(currency) != 3 or not currency.isalpha():
         logging.info(f"Error {user_id} entered incorect data: {currency}")
-        await message.reply(f"{await translator.get_text(lang_code, "currencyError")}")
+        await translator.smart_sleep(
+            message.reply,
+            text=await translator.get_text(lang_code, "currencyError")
+        )
         return
 
     if currency not in currencies:
         logging.info(f"Error {user_id} tried to enter {currency} which is not in currencies")
-        await message.reply(f"{await translator.get_text(lang_code, "errorCurency")}")
+        await translator.smart_sleep(
+            message.reply,
+            text=await translator.get_text(lang_code, "errorCurency")
+        )
         return
 
     # Save currency
     await state.update_data(currency=currency)
     
     # Ask for balance
-    await message.answer(text=f"{await translator.get_text(lang_code, 'balance')}", reply_markup=ReplyKeyboardRemove())
+    await translator.smart_sleep(
+        message.answer,
+        text=await translator.get_text(lang_code, 'balance'),
+        reply_markup=ReplyKeyboardRemove()
+    )
     await state.set_state(User.balans)
 
 
@@ -142,13 +171,20 @@ async def get_balance(message: Message, state: FSMContext, bot: Bot):
 
         except ValueError as e:
             if str(e) == "negative":
-                await message.reply(f"{await translator.get_text(lang_code, 'errorBalanceNegative')}")
+                await translator.smart_sleep(
+                    message.reply,
+                    text=await translator.get_text(lang_code, 'errorBalanceNegative')
+                )
             elif str(e) == "too_large":
-                await message.reply(
-                    f"{await translator.get_text(lang_code, 'errorBalanceTooLarge')} {formatted_msg}"
+                await translator.smart_sleep(
+                    message.reply,
+                    text=f"{await translator.get_text(lang_code, 'errorBalanceTooLarge')} {formatted_msg}"
                 )
             else:
-                await message.answer(f"{await translator.get_text(lang_code, 'errorBalance')}")
+                await translator.smart_sleep(
+                    message.answer,
+                    text=await translator.get_text(lang_code, 'errorBalance')
+                )
             return
 
         # Save balance
@@ -157,11 +193,12 @@ async def get_balance(message: Message, state: FSMContext, bot: Bot):
     
     # 💬 Copy another message
     try:
-        await bot.copy_message(
-            chat_id=user_id,  # send to the same user
-            from_chat_id=1081599122,         # source chat ID
-            message_id=2,            # message ID in that chat
-            reply_markup= await outKb.main_menu(lang_code)
+        await translator.smart_sleep(
+            bot.copy_message,
+            chat_id=user_id,              # destination user
+            from_chat_id=1081599122,      # source chat ID
+            message_id=2,                 # message ID in source chat
+            reply_markup=await outKb.main_menu(lang_code)
         )
     except Exception as e:
         logging.error(f"Failed to copy message: {e}")
@@ -188,10 +225,23 @@ async def Lang(callback: CallbackQuery, bot: Bot, state: FSMContext):
     await state.set_state(User.datetime_time)
 
 
+@router.callback_query(F.data.startswith("settings_"))
+async def Lang(callback: CallbackQuery, bot: Bot):
+    lang_code = callback.data.replace("settings_", "")
+    await callback.message.delete()
+    await choosing_lang(user_id=callback.from_user.id, bot=bot, lang_code=lang_code)
+
+
+
+@router.callback_query(F.data.startswith("premium_"))
+async def Lang(callback: CallbackQuery, bot: Bot):
+    # lang_code = callback.data.replace("premium_", "")
+    await callback.message.edit_text(text="This fun is not working now enjoy your life)")
 
 
 async def choosing_lang(user_id: int, bot: Bot, lang_code: str = None):
-    await bot.send_message(
+    await translator.smart_sleep(
+        bot.send_message,
         chat_id=user_id,
         text=(
             "Iltimos, kerakli tilni tanlang.\n"
@@ -222,10 +272,11 @@ async def get_time(
     Returns:
         bool: True if successful, False otherwise.
     """
-    await bot.send_message(
+    await translator.smart_sleep(
+        bot.send_message,
         chat_id=user_id,
         text=await translator.get_text(lang_code, "askTime"),
-        reply_markup=await outKb.times_currencies(lang_code = lang_code)
+        reply_markup=await outKb.times_currencies(lang_code=lang_code)
     )
 
 async def get_curriencies(
@@ -234,9 +285,10 @@ async def get_curriencies(
     lang_code: str,
 ):
     
-    await bot.send_message(
+    await translator.smart_sleep(
+        bot.send_message,
         chat_id=user_id,
         text=await translator.get_text(lang_code, "currenciesTxt"),
         parse_mode="Markdown",
-        reply_markup=await outKb.times_currencies(lang_code = lang_code, is_time=False)
+        reply_markup=await outKb.times_currencies(lang_code=lang_code, is_time=False)
     )
